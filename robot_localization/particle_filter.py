@@ -39,11 +39,23 @@ class ParticleFilter(Node):
         self.transform_helper = TFHelper(self)
         self.occupancy_grid = OccupancyField(self)
         self.create_subscription(LaserScan, 'scan', self.process_scan, 10)
+        self.create_subscription(Odometry, 'odom', self.update_map_to_odom_transform, 10)
         self.particles = initialize_particles(num_particles, self.occupancy_grid)
-    
+        self.map_frame = "map"
+        self.odom_frame = "odom"
     def process_scan(self, msg: LaserScan):
         # TODO ParticleFilter process_scan
+
+        points=lidar_scan
         pass
+
+    def update_map_to_odom_transform(self, odom):
+        
+        self.transform_helper.send_last_map_to_odom_transform(self.map_frame, self.odom_frame, odom.header.stamp)
+        
+        
+        pass
+
 
 
 def main():
