@@ -36,7 +36,7 @@ def generate_launch_description():
             output='screen'
         ),
         Node(package='robot_localization',
-             executable='pf.py',
+             executable='particle_filter.py',
              name='my_pf',
              parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
              emulate_tty=True,  # https://github.com/ros2/launch/issues/188
