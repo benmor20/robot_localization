@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 
 import rclpy
 from rclpy.node import Node
@@ -53,8 +54,6 @@ class ParticleFilter(Node):
         
         self.transform_helper.send_last_map_to_odom_transform(self.map_frame, self.odom_frame, odom.header.stamp)
         
-        
-        pass
 
 
 
