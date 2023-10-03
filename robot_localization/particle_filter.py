@@ -43,18 +43,15 @@ class ParticleFilter(Node):
         self.particles = initialize_particles(num_particles, self.occupancy_grid)
         self.map_frame = "map"
         self.odom_frame = "odom"
+        self.base_frame = "base_footprint"
+    
     def process_scan(self, msg: LaserScan):
         # TODO ParticleFilter process_scan
+        (new_pose, time_diff) = self.transform_helper.get_matching_odom_pose(self.odom_frame, self.base_frame, msg.header.stamp)
 
-        points=lidar_scan
-        pass
 
     def update_map_to_odom_transform(self, odom):
-        
         self.transform_helper.send_last_map_to_odom_transform(self.map_frame, self.odom_frame, odom.header.stamp)
-        
-        
-        pass
 
 
 
