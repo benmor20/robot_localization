@@ -49,7 +49,9 @@ class ParticleFilter(Node):
     def process_scan(self, msg: LaserScan):
         # TODO ParticleFilter process_scan
         (new_pose, time_diff) = self.transform_helper.get_matching_odom_pose(self.odom_frame, self.base_frame, msg.header.stamp)
-
+        if new_pose is None:
+            return
+        (r, theta) = self.transform_helper.convert_scan_to_polar_in_robot_frame(msg, self.base_frame)
 
     def update_map_to_odom_transform(self, odom):
         self.transform_helper.send_last_map_to_odom_transform(self.map_frame, self.odom_frame, odom.header.stamp)
