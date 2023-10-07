@@ -45,13 +45,28 @@ class ParticleFilter(Node):
         self.map_frame = "map"
         self.odom_frame = "odom"
         self.base_frame = "base_footprint"
+        self.old_pose = None
     
     def process_scan(self, msg: LaserScan):
         # TODO ParticleFilter process_scan
-        (new_pose, time_diff) = self.transform_helper.get_matching_odom_pose(self.odom_frame, self.base_frame, msg.header.stamp)
+        new_pose, time_diff = self.transform_helper.get_matching_odom_pose(self.odom_frame, self.base_frame, msg.header.stamp)
         if new_pose is None:
             return
-        (r, theta) = self.transform_helper.convert_scan_to_polar_in_robot_frame(msg, self.base_frame)
+        new_pose = self.transform_helper.convert_pose_to_xy_and_theta(new_pose)
+        if self.old_pose is None:
+            self.old_pose = new_pose
+            return
+        if self.old_pose == new_pose:
+            return
+        
+        # Update particles based on odom
+        angles = self.particles[:, 2] - self.old_pose[2]
+        rot = np.array([[np.cos(angles), -np.sin(angles)], [np.sin(angles), np.cos(angles)]])
+        rot = np.moveaxis(rot, -1, 0)
+        pos_diff = np.array(new_pose[:2]) - np.array(self.old_pose[:2])
+        self.particles = rot @ pos_diff + self.particles[:, :2]
+        
+        self.old_pose = new_pose
 
     def update_map_to_odom_transform(self, odom):
         self.transform_helper.send_last_map_to_odom_transform(self.map_frame, self.odom_frame, odom.header.stamp)
