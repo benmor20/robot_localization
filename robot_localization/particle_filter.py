@@ -9,6 +9,9 @@ from occupancy_field import OccupancyField
 import numpy as np
 
 
+TARGET_NUM_PTS = 90
+
+
 def initialize_particles(num: int, map: OccupancyField) -> np.ndarray:
     """
     Initialize num particles in a uniformly random distribution within the map
@@ -42,14 +45,16 @@ class ParticleFilter(Node):
         self.create_subscription(LaserScan, 'scan', self.process_scan, 10)
         self.create_subscription(Odometry, 'odom', self.update_map_to_odom_transform, 10)
         self.particles = initialize_particles(num_particles, self.occupancy_grid)
+        self.num_particles = num_particles
         self.map_frame = "map"
         self.odom_frame = "odom"
         self.base_frame = "base_footprint"
         self.old_pose = None
+        self.pose_guess = None
     
     def process_scan(self, msg: LaserScan):
         # TODO ParticleFilter process_scan
-        new_pose, time_diff = self.transform_helper.get_matching_odom_pose(self.odom_frame, self.base_frame, msg.header.stamp)
+        new_pose, _ = self.transform_helper.get_matching_odom_pose(self.odom_frame, self.base_frame, msg.header.stamp)
         if new_pose is None:
             return
         new_pose = self.transform_helper.convert_pose_to_xy_and_theta(new_pose)
@@ -65,7 +70,39 @@ class ParticleFilter(Node):
         rot = np.moveaxis(rot, -1, 0)
         pos_diff = np.array(new_pose[:2]) - np.array(self.old_pose[:2])
         self.particles = rot @ pos_diff + self.particles[:, :2]
+
+        # Average points
+        averaged_dists = np.mean(np.array(msg.ranges[:-1]).reshape((TARGET_NUM_PTS, -1)), axis=1)
+        angles = np.arange(msg.angle_min, msg.angle_max, msg.angle_increment)
+        averaged_angles = np.mean(angles.reshape((TARGET_NUM_PTS, -1)), axis=1) 
+
+        # Calculate x and y if scan was seen from each particle
+        angles_from_particles = averaged_angles.reshape((1, -1)) + self.particles[:, 2].reshape((-1, 1))
+        x_points_from_particles = averaged_dists * np.cos(angles_from_particles)
+        y_points_from_particles = averaged_dists * np.sin(angles_from_particles)
+        x_points = x_points_from_particles + self.particles[:, 0].reshape((-1, 1))
+        y_points = y_points_from_particles + self.particles[:, 1].reshape((-1, 1))
         
+        # Calculate weights
+        dist_to_walls = self.occupancy_grid.get_closest_obstacle_distance(x_points, y_points)
+        unscaled_weights = 1.0 / (np.sum(dist_to_walls, axis=1))
+        scale_factor = self.num_particles / np.sum(unscaled_weights)
+        weights = unscaled_weights * scale_factor
+
+        # Calculate pose guess
+        best_particle_idx = np.argmax(weights)
+        self.pose_guess = tuple(self.particles[best_particle_idx, :])
+
+        # Generate new particles
+        new_particles = []
+        for particle_idx, particle_weight in enumerate(weights):
+            num_new_particles = int(particle_weight)
+            if num_new_particles == 0:
+                continue
+            new_particles.append(np.random.normal(self.particles[particle_idx, :], 1 / particle_weight, (num_new_particles, 3)))
+        self.particles = np.concatenate(new_particles)
+        
+        # Update old pose
         self.old_pose = new_pose
 
     def update_map_to_odom_transform(self, odom):
