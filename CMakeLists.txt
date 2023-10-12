@@ -25,7 +25,7 @@ if(BUILD_TESTING)
 endif()
 
 install(PROGRAMS
-        robot_localization/particle_filter.py
+        robot_localization/pf.py
         DESTINATION lib/${PROJECT_NAME})
 
 
