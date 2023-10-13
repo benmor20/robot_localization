@@ -59,7 +59,8 @@ def pose_from_particle(particle: np.ndarray) -> Pose:
     return pose
 
 
-SAMPLE_STD_DEV = 1.0
+SAMPLE_STD_DEV = np.array([0.01, 0.01, 0.001])
+MAX_STD_DEV = np.array([0.5, 0.5, 0.2])
 TARGET_NUM_POINTS = 90
 
 
@@ -91,7 +92,7 @@ class ParticleFilter(Node):
         self.odom_frame = "odom"        # the name of the odometry coordinate frame
         self.scan_topic = "scan"        # the topic where we will get laser scans from 
 
-        self.n_particles = 300          # the number of particles to use
+        self.n_particles = 400          # the number of particles to use
 
         self.d_thresh = 0.2             # the amount of linear movement before performing an update
         self.a_thresh = math.pi/6       # the amount of angular movement before performing an update
@@ -163,13 +164,13 @@ class ParticleFilter(Node):
             return
         
         (r, theta) = self.transform_helper.convert_scan_to_polar_in_robot_frame(msg, self.base_frame)
-        print("r[0]={0}, theta[0]={1}".format(r[0], theta[0]))
+        # print("r[0]={0}, theta[0]={1}".format(r[0], theta[0]))
         # clear the current scan so that we can process the next one
         self.scan_to_process = None
 
         self.odom_pose = new_pose
         new_odom_xy_theta = self.transform_helper.convert_pose_to_xy_and_theta(self.odom_pose)
-        print("x: {0}, y: {1}, yaw: {2}".format(*new_odom_xy_theta))
+        # print("x: {0}, y: {1}, yaw: {2}".format(*new_odom_xy_theta))
 
         if not self.current_odom_xy_theta:
             self.current_odom_xy_theta = new_odom_xy_theta
@@ -182,6 +183,7 @@ class ParticleFilter(Node):
             self.update_particles_with_laser(r, theta)   # update based on laser scan
             self.update_robot_pose()                # update robot's pose based on particles
             self.resample_particles()               # resample particles to focus on areas of high density
+            self.update_particles_with_laser(r, theta)  # Update weights (so publish_particles actually works)
         # publish particles (so things like rviz can see them)
         self.publish_particles(msg.header.stamp)
 
@@ -203,6 +205,7 @@ class ParticleFilter(Node):
         best_particle_idx = np.argmax(self.weights)
         best_particle = self.particle_cloud[best_particle_idx, :]
         self.robot_pose = pose_from_particle(best_particle)
+        print(f'{self.robot_pose = }')
 
         if hasattr(self, 'odom_pose'):
             self.transform_helper.fix_map_to_odom_transform(self.robot_pose,
@@ -249,10 +252,21 @@ class ParticleFilter(Node):
             num_new_particles = int(particle_weight * self.n_particles)
             if num_new_particles == 0:
                 continue
-            new_particles.append(np.random.normal(self.particle_cloud[particle_idx, :], SAMPLE_STD_DEV / particle_weight, (num_new_particles, 3)))
+            sample = float('nan') * np.ones((num_new_particles, 3))
+            nan_samples = np.ones((num_new_particles,)).astype(bool)
+            std_dev = SAMPLE_STD_DEV / particle_weight
+            too_big = std_dev > MAX_STD_DEV
+            std_dev[too_big] = MAX_STD_DEV[too_big]
+            print(f'{particle_idx = }, {particle_weight = }, {std_dev = }, {num_new_particles = }')
+            while np.sum(nan_samples) > 0:
+                num_new_particles = np.sum(nan_samples)
+                sample[nan_samples, :] = np.random.normal(self.particle_cloud[particle_idx, :], std_dev, (num_new_particles, 3))
+                nan_samples = np.isnan(self.occupancy_field.get_closest_obstacle_distance(sample[:, 0], sample[:, 1]))
+            new_particles.append(sample)
         if len(new_particles) == 0:
             return
         self.particle_cloud = np.concatenate(new_particles)
+        print(f'Size of new particle cloud is {self.particle_cloud.shape}')
 
     def update_particles_with_laser(self, r, theta):
         """ Updates the particle weights in response to the scan data
@@ -292,16 +306,21 @@ class ParticleFilter(Node):
             xy_theta = self.transform_helper.convert_pose_to_xy_and_theta(self.odom_pose)
         self.particle_cloud = []
         
-        (minx, maxx), (miny, maxy) = self.occupancy_field.get_obstacle_bounding_box()
-        xs = np.random.uniform(minx, maxx, self.n_particles)
-        ys = np.random.uniform(miny, maxy, self.n_particles)
-        thetas = np.random.uniform(-np.pi, np.pi, self.n_particles)
-        particles = np.stack((xs, ys, thetas)).T
-        x_coords = np.floor((xs - self.occupancy_field.map.info.origin.position.x) / self.occupancy_field.map.info.resolution)
-        y_coords = np.floor((ys - self.occupancy_field.map.info.origin.position.y) / self.occupancy_field.map.info.resolution)
-        indexes = (x_coords + y_coords * self.occupancy_field.map.info.width).astype(int)
-        self.particle_cloud = particles[np.array(self.occupancy_field.map.data)[indexes] <= 0, :]
+        particles = np.random.normal(xy_theta, MAX_STD_DEV, (self.n_particles, 3))
+        out_of_bounds = np.isnan(self.occupancy_field.get_closest_obstacle_distance(particles[:, 0], particles[:, 1]))
+        self.particle_cloud = particles[~out_of_bounds, :]
         self.weights = np.ones(self.particle_cloud.shape[0])
+
+        # (minx, maxx), (miny, maxy) = self.occupancy_field.get_obstacle_bounding_box()
+        # xs = np.random.uniform(minx, maxx, self.n_particles)
+        # ys = np.random.uniform(miny, maxy, self.n_particles)
+        # thetas = np.random.uniform(-np.pi, np.pi, self.n_particles)
+        # particles = np.stack((xs, ys, thetas)).T
+        # x_coords = np.floor((xs - self.occupancy_field.map.info.origin.position.x) / self.occupancy_field.map.info.resolution)
+        # y_coords = np.floor((ys - self.occupancy_field.map.info.origin.position.y) / self.occupancy_field.map.info.resolution)
+        # indexes = (x_coords + y_coords * self.occupancy_field.map.info.width).astype(int)
+        # self.particle_cloud = particles[~np.isnan(self.occupancy_field.get_closest_obstacle_distance(particles[:, 0], particles[:, 1]))]
+        # self.weights = np.ones(self.particle_cloud.shape[0])
 
         self.normalize_particles()
         self.update_robot_pose()
