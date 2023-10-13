@@ -59,7 +59,7 @@ def pose_from_particle(particle: np.ndarray) -> Pose:
     return pose
 
 
-SAMPLE_STD_DEV = np.array([0.01, 0.01, 0.001])
+SAMPLE_STD_DEV = np.array([0.001, 0.001, 0.0001])
 MAX_STD_DEV = np.array([0.5, 0.5, 0.2])
 TARGET_NUM_POINTS = 90
 
